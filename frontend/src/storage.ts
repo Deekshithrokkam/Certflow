@@ -40,8 +40,8 @@ const entrySchema = z.object({
     "stopped",
     "complete",
   ]),
-  records: z.array(recordSchema).max(1000),
-  certificateCount: z.number().int().min(0).max(1000),
+  records: z.array(recordSchema),
+  certificateCount: z.number().int().min(0),
 });
 const historySchema = z.object({
   version: z.literal(1),
@@ -56,10 +56,6 @@ export function parseHistory(text: string): HistoryEntry[] {
   if (!result.success)
     throw Error(
       "Invalid CertFlow history. Import a version 1 CertFlow JSON export.",
-    );
-  if (result.data.batches.reduce((n, b) => n + b.records.length, 0) > 10000)
-    throw Error(
-      "History exceeds 10,000 records. Export and clear older batches first.",
     );
   return result.data.batches;
 }

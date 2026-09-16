@@ -976,8 +976,8 @@ function Dropzone({
       </h3>
       <p>
         {kind === "ZIP"
-          ? "PDF, PNG, JPG or JPEG · Up to 50 MB ZIP · 1,000 certificates"
-          : "UTF-8 CSV · Up to 2 MB · 1,000 recipients"}
+          ? "PDF, PNG, JPG or JPEG · 15 MB per certificate · Upload capacity depends on your server"
+          : "UTF-8 CSV · Upload capacity depends on your server"}
       </p>
       <button
         className="button secondary"

@@ -71,14 +71,16 @@ describe("CSV and validation", () => {
     expect(p.mapping.name).toBe("full_name");
     expect(p.rows[0].full_name).toBe("Doe, John");
   });
-  it("rejects malformed CSV, duplicate headers, empty or oversized input", () => {
+  it("rejects malformed CSV, duplicate headers, and empty input", () => {
     for (const s of [
       "name,name\nx,y",
       "name,email\nx,y,z",
       "name,email",
-      "name,email\n" + Array(1001).fill("a,b").join("\n"),
     ])
       expect(() => parseCSV(s)).toThrow();
+  });
+  it("accepts more than 1,000 CSV recipients without a configured cap", () => {
+    expect(parseCSV("name,email\n" + Array(1001).fill("a,b").join("\n")).rows).toHaveLength(1001);
   });
   it("requires unambiguous alias mapping", () =>
     expect(parseCSV("name,full_name,email\na,b,x@y.com").mapping.name).toBe(

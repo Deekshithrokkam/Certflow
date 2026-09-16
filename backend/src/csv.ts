@@ -3,6 +3,7 @@ import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import type { Mapping, Recipient } from "./types.js";
 import { AppError } from "./errors.js";
+import { uploadLimits } from "./limits.js";
 const aliases = {
   name: ["name", "full_name", "participant", "participant_name"],
   email: ["email", "email_address", "recipient_email", "gmail"],
@@ -28,11 +29,13 @@ export function parseCSV(text: string) {
       "CSV could not be read. Check quoting and column counts.",
     );
   }
-  if (values.length < 2 || values.length > 1001)
+  if (values.length < 2)
     throw new AppError(
       400,
-      "CSV must contain a header and between 1 and 1,000 recipients.",
+      "CSV must contain a header and at least one recipient.",
     );
+  if (uploadLimits.recipients && values.length - 1 > uploadLimits.recipients)
+    throw new AppError(400, `CSV exceeds the configured ${uploadLimits.recipients} recipient limit.`);
   const headers = values[0];
   if (
     headers.length > 40 ||

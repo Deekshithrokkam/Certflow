@@ -21,6 +21,7 @@ import { defaultTemplate, publicBatch, type Batch } from "./types.js";
 import { parseCSV, recipientsFromRows, validEmail } from "./csv.js";
 import { matchRecipients } from "./matching.js";
 import { inspectZip } from "./zip.js";
+import { uploadLimits } from "./limits.js";
 import { buildMIME, renderEmail } from "./email.js";
 import { makeOAuth, gmailSend } from "./gmail.js";
 import { runBatch, cleanFiles, stopBatch } from "./engine.js";
@@ -105,7 +106,8 @@ export async function createApplication(
   app.disable("x-powered-by");
   app.use(helmet());
   app.use(cors({ origin: frontend, credentials: true }));
-  app.use(express.json({ limit: "3mb" }));
+  // Duplicate-history requests may contain a large, locally saved batch.
+  app.use(express.json({ limit: "25mb" }));
   app.use(cookieParser(secret));
   app.use(
     "/api",
@@ -373,10 +375,14 @@ export async function createApplication(
       req.cf.busy = false;
     }
   });
-  const upload = multer({
+  const makeUpload = (fileSize: number) => multer({
     dest: root,
-    limits: { fileSize: 50 * 1024 * 1024, files: 1, fields: 0 },
-  });
+    limits: { ...(fileSize > 0 ? { fileSize } : {}), files: 1, fields: 0 },
+  }).single("file");
+  const uploads = {
+    zip: makeUpload(uploadLimits.zipBytes),
+    csv: makeUpload(uploadLimits.csvBytes),
+  };
   const uploadGate = (req: Request, _res: Response, next: NextFunction) => {
     const b = mutable(req);
     if (b.records.some((r) => ['sent', 'unknown'].includes(r.status)))
@@ -387,14 +393,17 @@ export async function createApplication(
   };
   function uploaded(handler: (req: Request) => Promise<unknown>) {
     return (req: Request, res: Response, next: NextFunction) => {
-      upload.single("file")(req, res, (err) => {
+      const kind = req.path.endsWith("upload-zip") ? "zip" : "csv";
+      uploads[kind](req, res, (err) => {
         void (async () => {
           let result: unknown;
           try {
             if (err)
               throw new AppError(
-                400,
-                "Upload failed. Maximum ZIP size is 50 MB and CSV size is 2 MB.",
+                err.code === "LIMIT_FILE_SIZE" ? 413 : 400,
+                err.code === "LIMIT_FILE_SIZE"
+                  ? `${kind.toUpperCase()} exceeds the configured ${uploadLimits[kind === "zip" ? "zipBytes" : "csvBytes"] / (1024 * 1024)} MB upload limit.`
+                  : "Upload failed. Send one file without additional form fields.",
               );
             if (!req.file) throw new AppError(400, "Choose a file to upload.");
             result = await handler(req);
@@ -436,11 +445,8 @@ export async function createApplication(
     uploadGate,
     uploaded(async (req) => {
       const b = batch(req);
-      if (
-        !req.file!.originalname.toLowerCase().endsWith(".csv") ||
-        req.file!.size > 2 * 1024 * 1024
-      )
-        throw new AppError(400, "Upload a CSV no larger than 2 MB.");
+      if (!req.file!.originalname.toLowerCase().endsWith(".csv"))
+        throw new AppError(400, "Upload a CSV file.");
       const bytes = await readFile(req.file!.path);
       let text: string;
       try {
@@ -473,7 +479,6 @@ export async function createApplication(
               certificateHash: z.string().optional(),
             }),
           )
-          .max(10000)
           .default([]),
       })
       .strict()

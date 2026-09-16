@@ -11,6 +11,7 @@ import { PDFDocument } from "pdf-lib";
 import sharp from "sharp";
 import type { Certificate } from "./types.js";
 import { AppError } from "./errors.js";
+import { uploadLimits } from "./limits.js";
 export function safeZipPath(name: string) {
   return (
     !!name &&
@@ -63,8 +64,9 @@ export async function inspectZip(
       });
       zip.on("entry", (entry: yauzl.Entry) => {
         void (async () => {
-          if (++entries > 2000)
-            throw new AppError(400, "ZIP exceeds the 2,000 entry limit.");
+          entries++;
+          if (uploadLimits.entries && entries > uploadLimits.entries)
+            throw new AppError(400, `ZIP exceeds the configured ${uploadLimits.entries} entry limit.`);
           if (!safeZipPath(entry.fileName))
             throw new AppError(400, "ZIP contains an unsafe file path.");
           const mode = (entry.externalFileAttributes >>> 16) & 0xf000;
@@ -84,16 +86,16 @@ export async function inspectZip(
           }
           total += entry.uncompressedSize;
           if (
-            total > 250 * 1024 * 1024 ||
+            (uploadLimits.expandedBytes > 0 && total > uploadLimits.expandedBytes) ||
             entry.uncompressedSize > 15 * 1024 * 1024 ||
             entry.uncompressedSize / Math.max(entry.compressedSize, 1) > 200
           )
             throw new AppError(
               400,
-              "ZIP exceeds safety limits: 250 MB expanded, 15 MB per file, or 200:1 compression.",
+              "ZIP exceeds safety limits: configured expanded size, 15 MB per file, or 200:1 compression.",
             );
-          if (files.length >= 1000)
-            throw new AppError(400, "ZIP exceeds the 1,000 certificate limit.");
+          if (uploadLimits.certificates && files.length >= uploadLimits.certificates)
+            throw new AppError(400, `ZIP exceeds the configured ${uploadLimits.certificates} certificate limit.`);
           const id = randomUUID(),
             filename = path.posix.basename(entry.fileName),
             ext = path.extname(filename).toLowerCase();
