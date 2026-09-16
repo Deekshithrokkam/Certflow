@@ -9,8 +9,8 @@
     {"source":"/socket.io/:path*","headers":[{"key":"Cache-Control","value":"no-store"},{"key":"x-vercel-enable-rewrite-caching","value":"0"}]}
   ],
   "rewrites":[
-    {"source":"/api/:path*","destination":"https://YOUR-RENDER-SERVICE.onrender.com/api/:path*"},
-    {"source":"/socket.io/:path*","destination":"https://YOUR-RENDER-SERVICE.onrender.com/socket.io/:path*"},
+    {"source":"/api/:path*","destination":"https://certflow-8o7c.onrender.com/api/:path*"},
+    {"source":"/socket.io/:path*","destination":"https://certflow-8o7c.onrender.com/socket.io/:path*"},
     {"source":"/((?!assets/).*)","destination":"/index.html"}
   ]
 }
