@@ -7,7 +7,7 @@ import JSZip from "jszip";
 import { PDFDocument } from "pdf-lib";
 import { simpleParser } from "mailparser";
 import { parseCSV, recipientsFromRows, validEmail } from "../src/csv.js";
-import { matchRecipients } from "../src/matching.js";
+import { pairRecipients } from "../src/pairing.js";
 import { safeZipPath, inspectZip } from "../src/zip.js";
 import { renderEmail, buildMIME } from "../src/email.js";
 import { defaultTemplate, type Batch, type Certificate } from "../src/types.js";
@@ -32,10 +32,10 @@ const rows = () => {
   return recipientsFromRows(p.rows, p.mapping);
 };
 const certs = (): Certificate[] =>
-  rows().map((r) => ({
+  ["John_Doe.pdf", "Rahul_Kumar.pdf", "Priya_Sharma.pdf"].map((filename) => ({
     id: randomUUID(),
-    filename: r.reference,
-    relativePath: r.reference,
+    filename,
+    relativePath: filename,
     size: 30,
     mime: "application/pdf",
     hash: "abc",
@@ -96,54 +96,46 @@ describe("CSV and validation", () => {
     ])
       expect(validEmail(value)).toBe(false);
   });
-  it("flags duplicate emails, references and missing fields", () => {
+  it("flags duplicate emails and missing fields", () => {
     const p = parseCSV(
       "name,email,certificate\n,john@@gmail.com,same.pdf\nJohn,john@@gmail.com,same.pdf",
     );
     const r = recipientsFromRows(p.rows, p.mapping);
-    expect(r[0].errors).toHaveLength(4);
+    expect(r[0].errors).toHaveLength(3);
   });
   it("preserves spaces and warns rather than silently changing data", () => {
     const p = parseCSV("name,email,certificate\n John ,john@gmail.com,");
     const [r] = recipientsFromRows(p.rows, p.mapping);
     expect(r.name).toBe(" John ");
-    expect(r.warnings).toHaveLength(2);
+    expect(r.warnings).toHaveLength(1);
   });
 });
-describe("matching", () => {
-  it("matches the specified three-recipient scenario", () => {
-    const r = matchRecipients(rows(), certs());
-    expect(r).toHaveLength(3);
-    expect(r.every((r) => r.status === "ready" && r.errors.length === 0)).toBe(
-      true,
-    );
+describe("ordered pairing", () => {
+  it("pairs name/email rows by archive order regardless of filenames", () => {
+    const parsed = parseCSV("names,gmails\nFirst,first@example.com\nSecond,second@example.com\nThird,third@example.com");
+    const files = certs().reverse();
+    const paired = pairRecipients(recipientsFromRows(parsed.rows, parsed.mapping), files);
+    expect(paired.map((r) => r.certificateId)).toEqual(files.map((f) => f.id));
+    expect(paired.map((r) => r.name)).toEqual(["First", "Second", "Third"]);
+    expect(paired.every((r) => r.status === "ready" && r.approved)).toBe(true);
   });
-  it("requires explicit approval for normalized matches", () => {
-    const r = rows();
-    r[0].reference = "john-doe.PDF";
-    const m = matchRecipients(r, certs());
-    expect(m[0].match).toBe("Normalized filename");
-    expect(m[0].status).toBe("blocked");
+  it("rejects extra or missing certificates instead of truncating", () => {
+    expect(() => pairRecipients(rows(), [])).toThrow("Counts differ");
+    expect(() => pairRecipients(rows(), certs().slice(1))).toThrow("Counts differ");
+    expect(() => pairRecipients(rows(), [...certs(), certs()[0]])).toThrow("Counts differ");
   });
-  it("blocks ambiguity instead of selecting the first file", () => {
-    const c = certs();
-    c.push({ ...c[0], id: randomUUID() });
-    expect(matchRecipients(rows(), c)[0].match).toBe("Ambiguous");
+  it("rejects invalid files without shifting later assignments", () => {
+    const files = certs();
+    files[1].status = "invalid";
+    expect(() => pairRecipients(rows(), files)).toThrow("Certificate 2");
   });
-  it("blocks missing certificates and reuse across recipients", () => {
-    expect(
-      matchRecipients(rows(), []).every((r) => r.status === "blocked"),
-    ).toBe(true);
-    const r = rows();
-    r[1].name = "John Doe";
-    r[1].reference = "";
-    const m = matchRecipients(r, certs());
-    expect(m[0].errors.join()).toContain("multiple recipients");
-  });
-  it("never matches invalid files", () => {
-    const c = certs();
-    c[0].status = "invalid";
-    expect(matchRecipients(rows(), c)[0].certificateId).toBe("");
+  it("keeps invalid recipient rows in position", () => {
+    const recipients = rows(), files = certs();
+    recipients[0].errors.push("Invalid email");
+    const paired = pairRecipients(recipients, files);
+    expect(paired[0].status).toBe("blocked");
+    expect(paired[1].certificateId).toBe(files[1].id);
+    expect(paired[2].certificateId).toBe(files[2].id);
   });
 });
 describe("ZIP security and files", () => {
@@ -155,7 +147,7 @@ describe("ZIP security and files", () => {
     "a\\b.pdf",
     "a\u0000.pdf",
   ])("rejects path %s", (p) => expect(safeZipPath(p)).toBe(false));
-  it("recurses, ignores system files, marks duplicate names and corrupt content", async () => {
+  it("preserves archive order, allows repeated basenames, and flags corrupt content", async () => {
     const zip = new JSZip();
     const data = await pdf();
     zip.file("a/John.pdf", data);
@@ -170,7 +162,8 @@ describe("ZIP security and files", () => {
     await writeFile(archive, await zip.generateAsync({ type: "nodebuffer" }));
     const files = await inspectZip(archive, dir);
     expect(files).toHaveLength(5);
-    expect(files.filter((f) => f.status === "duplicate")).toHaveLength(2);
+    expect(files.filter((f) => f.status === "valid")).toHaveLength(3);
+    expect(files.map((f) => f.relativePath)).toEqual(["a/John.pdf", "b/john.pdf", "other/valid.pdf", "broken.pdf", "script.js"]);
     expect(files.filter((f) => f.status === "invalid")).toHaveLength(2);
     expect(files.find((f) => f.filename === "valid.pdf")?.mime).toBe(
       "application/pdf",
@@ -215,7 +208,7 @@ describe("ZIP security and files", () => {
 });
 describe("HTML and MIME", () => {
   it("escapes all recipient HTML and rejects unknown or missing variables", () => {
-    const r = matchRecipients(rows(), certs())[0];
+    const r = pairRecipients(rows(), certs())[0];
     r.name = "<img src=x onerror=alert(1)>";
     expect(renderEmail(defaultTemplate, r).html).toContain("&lt;img");
     expect(renderEmail(defaultTemplate, r).html).not.toContain("<img");
@@ -227,7 +220,7 @@ describe("HTML and MIME", () => {
     ).toThrow();
   });
   it("builds a single-recipient MIME message with a real attachment", async () => {
-    const r = matchRecipients(rows(), certs())[0],
+    const r = pairRecipients(rows(), certs())[0],
       content = await pdf(),
       dir = await temp();
     const file = path.join(dir, "certificate");
@@ -265,7 +258,7 @@ describe("HTML and MIME", () => {
 describe("batch state and delivery safety", () => {
   it("sends sequentially, records IDs, and deletes attachments on completion", async () => {
     const b = await batch();
-    b.records = matchRecipients(rows(), b.certificates);
+    b.records = pairRecipients(rows(), b.certificates);
     let inFlight = 0,
       max = 0;
     await runBatch(
@@ -289,7 +282,7 @@ describe("batch state and delivery safety", () => {
   });
   it("retries temporary errors with bounded exponential backoff", async () => {
     const b = await batch();
-    b.records = matchRecipients(rows(), b.certificates).slice(0, 1);
+    b.records = pairRecipients(rows(), b.certificates).slice(0, 1);
     let calls = 0;
     const waits: number[] = [];
     await runBatch(
@@ -309,7 +302,7 @@ describe("batch state and delivery safety", () => {
   it("does not retry permanent or uncertain deliveries", async () => {
     for (const kind of ["permanent", "unknown"] as const) {
       const b = await batch();
-      b.records = matchRecipients(rows(), b.certificates).slice(0, 1);
+      b.records = pairRecipients(rows(), b.certificates).slice(0, 1);
       let count = 0;
       await runBatch(
         b,
@@ -328,7 +321,7 @@ describe("batch state and delivery safety", () => {
   });
   it("pauses between messages and resumes without duplication", async () => {
     const b = await batch();
-    b.records = matchRecipients(rows(), b.certificates);
+    b.records = pairRecipients(rows(), b.certificates);
     let count = 0,
       paused = false;
     await runBatch(
@@ -354,7 +347,7 @@ describe("batch state and delivery safety", () => {
   });
   it("stops after the in-flight message and marks remaining recipients stopped", async () => {
     const b = await batch();
-    b.records = matchRecipients(rows(), b.certificates);
+    b.records = pairRecipients(rows(), b.certificates);
     let count = 0;
     await runBatch(
       b,

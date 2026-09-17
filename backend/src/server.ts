@@ -19,7 +19,7 @@ import type { OAuth2Client } from "google-auth-library";
 import { AppError, SendError } from "./errors.js";
 import { defaultTemplate, publicBatch, type Batch } from "./types.js";
 import { parseCSV, recipientsFromRows, validEmail } from "./csv.js";
-import { matchRecipients } from "./matching.js";
+import { pairRecipients } from "./pairing.js";
 import { inspectZip } from "./zip.js";
 import { uploadLimits } from "./limits.js";
 import { buildMIME, renderEmail } from "./email.js";
@@ -52,7 +52,7 @@ const mappingSchema = z
   .object({
     name: z.string().min(1),
     email: z.string().min(1),
-    certificate: z.string(),
+    certificate: z.string().default(""),
     certificate_id: z.string().optional(),
   })
   .strict();
@@ -333,7 +333,7 @@ export async function createApplication(
     const c = b.certificates.find(
       (c) => c.id === r.certificateId && c.status === "valid",
     );
-    if (!c) throw new AppError(409, "Matched certificate is not available.");
+    if (!c) throw new AppError(409, "Assigned certificate is not available.");
     return buildMIME(s.email!, to, b.template, r, c).then((raw) =>
       sendRaw(s.oauth!, raw),
     );
@@ -464,10 +464,11 @@ export async function createApplication(
   app.post("/api/batch/analyze", (req, res) =>
     res.json(publicBatch(batch(req))),
   );
-  app.post("/api/batch/match", (req, res) => {
+  // Retain the old URL as an alias for clients open during deployment.
+  app.post(["/api/batch/pair", "/api/batch/match"], (req, res) => {
     const b = mutable(req);
     if (b.records.some((r) => ['sent', 'unknown'].includes(r.status)))
-      throw new AppError(409, 'Delivered or uncertain records cannot be rematched. Create a new batch.');
+      throw new AppError(409, 'Delivered or uncertain records cannot be paired again. Create a new batch.');
     const data = z
       .object({
         mapping: mappingSchema,
@@ -483,16 +484,20 @@ export async function createApplication(
       })
       .strict()
       .parse(req.body);
-    for (const key of Object.values(data.mapping))
+    for (const key of [data.mapping.name, data.mapping.email])
       if (key && !b.headers.includes(key))
         throw new AppError(400, "Mapped column was not found in the CSV.");
     if (!b.rows.length || !b.filesAvailable)
       throw new AppError(409, "Upload both the CSV and ZIP first.");
-    b.mapping = data.mapping;
-    b.records = matchRecipients(
-      recipientsFromRows(b.rows, data.mapping),
+    if (data.mapping.name === data.mapping.email)
+      throw new AppError(400, "Choose different columns for name and email.");
+    const mapping = { name: data.mapping.name, email: data.mapping.email, certificate: "" };
+    const records = pairRecipients(
+      recipientsFromRows(b.rows, mapping),
       b.certificates,
     );
+    b.mapping = mapping;
+    b.records = records;
     for (const r of b.records)
       if (
         data.history.some(
@@ -515,7 +520,7 @@ export async function createApplication(
     const data = z
       .object({
         id: z.string(),
-        action: z.enum(["approve", "skip", "send-again"]),
+        action: z.enum(["skip", "send-again"]),
       })
       .strict()
       .parse(req.body);
@@ -528,9 +533,8 @@ export async function createApplication(
       if (r.errors.length)
         throw new AppError(
           409,
-          "Correct the CSV or ZIP and match again to fix validation errors.",
+          "Correct the CSV or ZIP and upload again to fix validation errors.",
         );
-      if (data.action === "approve") r.approved = true;
       if (data.action === "send-again")
         r.warnings = r.warnings.filter(
           (w) => !w.startsWith("POSSIBLE DUPLICATE"),
@@ -702,7 +706,7 @@ export async function createApplication(
     if (active(b)) throw new AppError(409, "Wait for this batch to finish.");
     throw new AppError(
       409,
-      "Temporary attachments have been deleted. Use Retry Failed to create a new batch, upload the original ZIP, review, test, and confirm again.",
+      "Temporary attachments have been deleted. Use Retry Failed to download the failed-recipient CSV, upload only those certificates in the same order, review, test, and confirm again.",
     );
   });
   app.get("/api/batch/status", (req, res) =>

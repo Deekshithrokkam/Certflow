@@ -17,7 +17,7 @@ const post = (path: string, body: unknown) =>
     .set("X-CSRF-Token", csrf)
     .send(body);
 const scenario =
-  "name,email,certificate\nJohn Doe,john@gmail.com,John_Doe.pdf\nRahul Kumar,rahul@gmail.com,Rahul_Kumar.pdf\nPriya Sharma,priya@gmail.com,Priya_Sharma.pdf";
+  "name,email\nJohn Doe,john@gmail.com\nRahul Kumar,rahul@gmail.com\nPriya Sharma,priya@gmail.com";
 beforeAll(async () => {
   server = await createApplication({
     secret: "test-secret-at-least-thirty-two-characters",
@@ -56,8 +56,8 @@ async function prepare() {
     .set("X-CSRF-Token", csrf)
     .attach("file", Buffer.from(scenario), "recipients.csv");
   expect(response.status).toBe(200);
-  const matched = await post("/batch/match", {
-    mapping: { name: "name", email: "email", certificate: "certificate" },
+  const matched = await post("/batch/pair", {
+    mapping: { name: "name", email: "email" },
     history: [],
   });
   expect(matched.status).toBe(200);
@@ -81,7 +81,7 @@ describe("authenticated API and send gates", () => {
       ).status,
     ).toBe(403);
   });
-  it("runs upload → match → preview → one test → confirmed bulk without duplicates", async () => {
+  it("runs upload → pair → preview → one test → confirmed bulk without duplicates", async () => {
     const b = await prepare();
     expect(b.certificates.every((c: { path?: string }) => !c.path)).toBe(true);
     expect(
@@ -170,8 +170,8 @@ describe("authenticated API and send gates", () => {
   });
   it("protects duplicate local history until explicitly resolved", async () => {
     await prepare();
-    const match = await post("/batch/match", {
-      mapping: { name: "name", email: "email", certificate: "certificate" },
+    const match = await post("/batch/pair", {
+      mapping: { name: "name", email: "email" },
       history: [{ email: "john@gmail.com", certificate: "John_Doe.pdf" }],
     });
     expect(match.body.records[0].status).toBe("blocked");

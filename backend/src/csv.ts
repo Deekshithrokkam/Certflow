@@ -5,10 +5,8 @@ import type { Mapping, Recipient } from "./types.js";
 import { AppError } from "./errors.js";
 import { uploadLimits } from "./limits.js";
 const aliases = {
-  name: ["name", "full_name", "participant", "participant_name"],
-  email: ["email", "email_address", "recipient_email", "gmail"],
-  certificate: ["certificate", "certificate_file", "filename", "file"],
-  certificate_id: ["certificate_id", "id"],
+  name: ["name", "names", "full_name", "participant", "participant_name"],
+  email: ["email", "emails", "email_address", "recipient_email", "gmail", "gmails"],
 };
 export const validEmail = (value: string) =>
   value.length <= 254 &&
@@ -54,7 +52,7 @@ export function parseCSV(text: string) {
   };
   for (const key of Object.keys(aliases) as (keyof typeof aliases)[]) {
     const matches = headers.filter((h) =>
-      aliases[key].includes(h.toLowerCase()),
+      aliases[key].includes(h.trim().toLowerCase().replace(/\s+/g, "_")),
     );
     if (matches.length === 1) mapping[key] = matches[0];
   }
@@ -71,10 +69,8 @@ export function recipientsFromRows(
     id: randomUUID(),
     name: row[mapping.name] ?? "",
     email: row[mapping.email] ?? "",
-    reference: row[mapping.certificate] ?? "",
-    certificate_id: mapping.certificate_id
-      ? (row[mapping.certificate_id] ?? "")
-      : "",
+    reference: "",
+    certificate_id: "",
     certificateId: "",
     certificate: "",
     certificateHash: "",
@@ -91,8 +87,7 @@ export function recipientsFromRows(
       if (s) map.set(s, (map.get(s) ?? 0) + 1);
       return map;
     }, new Map<string, number>());
-  const emails = counts("email"),
-    refs = counts("reference");
+  const emails = counts("email");
   for (const r of recipients) {
     if (!r.name.trim()) r.errors.push("Missing recipient name.");
     if (r.name !== r.name.trim())
@@ -103,12 +98,6 @@ export function recipientsFromRows(
       r.errors.push(`Invalid recipient email: ${r.email}`);
     if ((emails.get(r.email.toLowerCase()) ?? 0) > 1)
       r.errors.push("Duplicate email address in CSV.");
-    if (!r.reference)
-      r.warnings.push(
-        "Missing certificate reference; any suggested match requires approval.",
-      );
-    if ((refs.get(r.reference.toLowerCase()) ?? 0) > 1)
-      r.errors.push("Duplicate certificate reference in CSV.");
   }
   return recipients;
 }

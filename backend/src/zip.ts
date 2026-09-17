@@ -181,17 +181,7 @@ export async function inspectZip(
       });
       zip.readEntry();
     });
-    const names = new Map<string, Certificate[]>();
-    for (const f of files) {
-      const key = f.filename.toLowerCase();
-      names.set(key, [...(names.get(key) ?? []), f]);
-    }
-    for (const group of names.values())
-      if (group.length > 1)
-        for (const f of group) {
-          f.status = "duplicate";
-          f.error = "Duplicate filename, including across nested folders.";
-        }
+    // Archive order is authoritative; equal filenames in different folders are allowed.
     return files;
   } catch (e) {
     await Promise.all(

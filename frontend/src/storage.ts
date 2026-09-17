@@ -151,10 +151,10 @@ export function reportCSV(records: Recipient[]) {
 }
 export function retryCSV(records: Recipient[]) {
   return (
-    "\uFEFFname,email,certificate,certificate_id\r\n" +
+    "\uFEFFname,email\r\n" +
     records
       .map((r) =>
-        [r.name, r.email, r.certificate || r.reference, r.certificate_id]
+        [r.name, r.email]
           .map(csvCell)
           .join(","),
       )

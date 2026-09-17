@@ -59,7 +59,7 @@ export async function buildMIME(
   if (!certificate.path)
     throw new AppError(
       409,
-      "Attachments expired. Upload the original ZIP again.",
+      "Attachments expired. Create a new batch with a ZIP and CSV containing the same recipients in the same order.",
     );
   const content = await readFile(certificate.path);
   if (

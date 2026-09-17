@@ -130,32 +130,35 @@ Set `VITE_API_URL=https://YOUR-API.onrender.com` and the callback to `https://YO
 
 ## The complete workflow
 
-1. Connect Gmail.
-2. Create a new batch. Upload a ZIP of PDF, PNG, JPG or JPEG certificates.
-3. Inspect filename, type, size, duplicate and corruption results. Nested folders are supported; filenames must remain unique across folders. Hidden/system files are ignored.
-4. Upload a UTF-8 CSV and verify column mapping. Name and email are required. A missing certificate-reference column is allowed but causes warnings and requires individual approval of inferred matches.
-5. Analyze and match. Exact matches are ready if otherwise valid. All non-exact suggestions remain blocked until you inspect and approve them. Ambiguous matches, duplicate emails, duplicate certificate references, and files reused by multiple recipients are blocked.
-6. Correct source files and re-upload, or explicitly skip blocked records. CertFlow does not silently trim, rewrite, repair or drop invalid recipient data.
-7. Edit sender name, event, date, subject and body. Variables: `{{name}}`, `{{email}}`, `{{certificate}}`, `{{event}}`, `{{date}}`, `{{certificate_id}}`. Missing or unknown variables prevent rendering/sending. The editor accepts text with variables and recreates the polished email using escaped content, inline styles and tables.
-8. Preview actual personalized HTML for each recipient in desktop/mobile widths. Download the certificate to inspect it.
-9. Send one test using a selected recipient's data and its matched attachment. The test address defaults to your connected Gmail account, but you must explicitly approve that destination. A test sent to the actual recipient is recorded as sent and excluded from the bulk batch.
-10. Review the checklist and remaining warnings. Select the confirmation checkbox, then press **Send N certificates**. The backend separately enforces the same gates and the tested batch revision.
-11. Watch live progress. Pause affects the next message. Stop finishes any in-flight request, marks remaining ready records stopped, and deletes temporary attachments.
-12. Export CSV/JSON reports. History is stored locally and can be imported on another device.
+1. Connect Gmail and create a batch.
+2. Upload the ZIP of PDF, PNG, JPG or JPEG certificates. Inspect the numbered ZIP-position list.
+3. Upload a UTF-8 CSV with a header row and two columns: `name,email`. `names,gmails` and common name/email aliases are also recognized. For unfamiliar headers, select just the name and email columns.
+4. CertFlow automatically pairs the first CSV data row with the first certificate, the second row with the second certificate, and so on. No filename, name, email-username, certificate-ID or fuzzy matching is performed. Extra certificate-reference columns are ignored.
+5. Review the paired recipient list. Counts must be equal, every ZIP entry shown as a certificate must be valid, and invalid or duplicate email rows remain blocked until corrected or explicitly skipped.
+6. Customize the email, preview the personalized content and attachment, and send one explicitly confirmed test.
+7. Confirm the final batch and send. Progress, pause/stop and CSV/JSON exports work as before.
 
-There is no screenshot embedded in an email. No visual reference image was provided with the specification; the template follows its written content and layout requirements.
+Example CSV:
 
-## Matching, duplicates, and retry semantics
+```csv
+name,email
+First Recipient,first@example.com
+Second Recipient,second@example.com
+```
 
-Matching priority: exact filename/path → case-insensitive filename → normalized filename → certificate ID → participant name → email username. Normalization handles Unicode normalization, case, spaces, underscores and hyphens. The match method is visible. Ambiguous candidates are never chosen arbitrarily.
+**Order means the ZIP archive's stored entry order**, not alphabetical, natural-number or file-browser sorting. CertFlow does not sort certificates. Folders and hidden/system entries are ignored; unsupported or corrupt visible files block pairing rather than being discarded and shifting later recipients. The numbered certificate list is authoritative. CSV rows retain their original order (excluding the header and empty lines). Repeated filenames in different folders are allowed because each entry has its own attachment ID.
 
-A correct filename match cannot prove the document itself belongs to that person. Inspect the attachments and source CSV before confirming. CertFlow verifies the SHA-256 fingerprint of the selected attachment immediately before MIME generation, preventing changed bytes from being sent under an approved match.
+Sorting or filtering the review table only changes its display: CSV row numbers and attachment assignments remain fixed. Skipping an invalid recipient leaves all later assignments intact. A successful upload does not prove the documents belong to the listed recipients; inspect the pairs before confirming.
+
+## Ordered pairing, duplicates, and retry semantics
+
+Counts must agree before any records are paired. Invalid certificate entries block the entire pairing operation. Invalid recipient rows keep their positions and are blocked individually. Uploaded certificate bytes are checked again against their approved SHA-256 fingerprints immediately before MIME generation.
 
 Local duplicate checks compare recipient email and certificate filename or SHA-256 hash against sent/uncertain records. The user must select Skip or Send Again for a possible duplicate. Local history is browser-specific and can be lost, cleared, edited, or unavailable; it is not an exactly-once or cross-device guarantee. Imported history is validated, bounded and merged without downgrading existing sent records.
 
 Only confirmed temporary rate-limit rejections receive automatic retries, with bounded exponential backoff and a capped `Retry-After`. Permanent errors are not repeatedly retried. A network timeout, ambiguous successful response or server-side Gmail error is marked **unknown** because Gmail might already have accepted the message. Verify Gmail Sent manually before starting a new reviewed batch for those records. The application has no mailbox-read scope to reconcile them automatically.
 
-After completion/stopping/expiry, attachments are deleted, including when some messages failed. **Retry Failed** creates a fresh draft with only confirmed failures. Upload the original ZIP, rematch, test and confirm again. Uncertain deliveries are excluded. This is intentionally safer than retaining attachments indefinitely or claiming durable server recovery.
+After completion/stopping/expiry, attachments are deleted, including when some messages failed. **Retry Failed** creates a fresh draft with only confirmed failures. Download the retry CSV, prepare a ZIP containing only those failed recipients' certificates in exactly the same order, then review, test and confirm again. Do not reuse the full original ZIP with a shorter retry CSV. Uncertain deliveries are excluded. This is intentionally safer than retaining attachments indefinitely or claiming durable server recovery.
 
 ## Storage and security model
 
@@ -180,14 +183,14 @@ npm run build
 npm audit --omit=dev
 ```
 
-The test suite covers CSV parsing/aliases/quoting/limits, email syntax, duplicate detection, exact/normalized/ambiguous/missing matches, real ZIP extraction, traversal and symlink rejection, ZIP bombs, corrupt files, HTML escaping, MIME attachments, Gmail response classification, sequential delivery, retry/backoff, pause/resume/stop, local history, CSV formula protection, authenticated API validation, CSRF, single-test idempotency and final-send gates. Gmail is mocked only through dependency injection in tests. The production entrypoint always uses the real Gmail adapter.
+The test suite covers CSV parsing/aliases/quoting/limits, email syntax, duplicate detection, ordered pairing, count mismatches, invalid entries without positional shifts, real ZIP extraction, traversal and symlink rejection, ZIP bombs, corrupt files, HTML escaping, MIME attachments, Gmail response classification, sequential delivery, retry/backoff, pause/resume/stop, local history, CSV formula protection, authenticated API validation, CSRF, single-test idempotency and final-send gates. Gmail is mocked only through dependency injection in tests. The production entrypoint always uses the real Gmail adapter.
 
 Sample certificates, recipient lists, and their generator are included only in the downloadable archive; they are omitted from this public repository. Use certificate files and recipient addresses you control.
 
 ### Production acceptance test (requires your accounts)
 
 1. Connect a Google test-user account on the actual deployed URL.
-2. Replace the example recipient addresses with three addresses you control. Upload the sample ZIP and edited CSV; verify the 3/3 match result.
+2. Replace the example recipient addresses with three addresses you control. Upload the sample ZIP and edited CSV; verify the three ordered pairs.
 3. Inspect each certificate and preview. Send one test to yourself and verify Gmail received the HTML and correct downloadable PDF.
 4. Confirm the bulk batch and verify three individually addressed messages, each with its own certificate. Check Gmail message IDs in the report.
 5. Run the invalid CSV scenario; confirm invalid/duplicate/missing records cannot be sent.
@@ -213,8 +216,8 @@ All batch/email routes require the authenticated cookie. Every mutation also req
 | POST | `/api/batch/upload-zip` | Multipart `file` ZIP upload |
 | POST | `/api/batch/upload-csv` | Multipart `file` CSV upload |
 | POST | `/api/batch/analyze` | Current analysis results |
-| POST | `/api/batch/match` | Column mapping and local duplicate advisory |
-| POST | `/api/batch/record` | Approve a suggestion, skip, or confirm a duplicate resend |
+| POST | `/api/batch/pair` | Pair by ZIP/CSV order using name/email columns and local duplicate advisory |
+| POST | `/api/batch/record` | Skip a recipient or confirm a duplicate resend |
 | GET | `/api/batch/attachment/:id` | Download a validated certificate |
 | POST | `/api/email/template` | Save template and invalidate previous test |
 | POST | `/api/email/preview` | Actual personalized HTML and envelope |
@@ -237,7 +240,7 @@ certflow/
     vercel.json
     vite.config.ts
   backend/
-    src/                 OAuth, APIs, ZIP/CSV, matching, MIME, Gmail, worker
+    src/                 OAuth, APIs, ZIP/CSV, ordered pairing, MIME, Gmail, worker
     test/                Core, Gmail adapter and authenticated API tests
     .env.example
   examples/              Three sample PDFs in a ZIP and CSV scenarios
@@ -256,7 +259,8 @@ certflow/
 - **redirect_uri_mismatch:** compare the exact URI in Google Console with `GOOGLE_REDIRECT_URI`. In proxy mode both use the frontend hostname.
 - **Login returns to a disconnected workspace:** check cookies, proxy destinations, `FRONTEND_URL`, HTTPS and `COOKIE_SAME_SITE`. Direct cross-site deployments may be blocked by the browser; use proxy or same-site domains.
 - **Connection interrupted:** inspect `/api/health`; Render may be starting or restarting. Do not blindly repeat a send request. Reconcile current batch status and Gmail Sent.
-- **Test required after an edit:** matching, skipping, approval and template changes invalidate the tested revision. Complete those changes before the final test.
-- **Attachments expired / Retry Failed:** upload the original ZIP into the newly created retry batch. No permanent server archive exists.
+- **Test required after an edit:** pairing, skipping and template changes invalidate the tested revision. Complete those changes before the final test.
+- **Attachments expired / Retry Failed:** upload only the failed recipients' certificates in the retry CSV's order into the new batch. No permanent server archive exists.
 - **History storage full:** export current reports and raw history from Settings, then clear older local history. Storage failures are surfaced in the UI.
 - **A session or batch disappears after deployment:** expected with in-memory operation. Reconnect, export existing local history and start a reviewed new batch. Do not assume unfinished recipients were never sent.
+

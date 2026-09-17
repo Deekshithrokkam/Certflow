@@ -82,7 +82,6 @@ import "./style.css";
 const steps = [
   "Certificates",
   "Recipients",
-  "Matching",
   "Email",
   "Preview",
   "Test",
@@ -373,7 +372,7 @@ function Landing() {
               <em>Automatically.</em>
             </h1>
             <p>
-              Upload certificates, match recipients, preview every email, and
+              Upload certificates and recipients in order, preview every email, and
               send personalized certificates directly from your Gmail account.
             </p>
             <div className="hero-actions">
@@ -442,7 +441,7 @@ function Landing() {
               </span>
               <div>
                 <strong>The right certificate. The right person.</strong>
-                <small>Review every match before you send.</small>
+                <small>Review your ordered pairs before you send.</small>
               </div>
             </div>
             <div className="preview-caption">
@@ -487,8 +486,8 @@ function Landing() {
               [
                 Link2,
                 "02",
-                "Make the right match",
-                "Inspect suggested matches, fix issues, and make sure every achievement reaches its owner.",
+                "Upload in the same order",
+                "Upload a certificate ZIP and a CSV of names and emails. The first row gets the first certificate.",
               ],
               [
                 Send,
@@ -563,7 +562,7 @@ function Landing() {
           <span className="eyebrow">CONFIDENCE COMES BUILT IN</span>
           <h2>Nothing sends until you say so.</h2>
           <p>
-            Connect securely with Google. Review every match. Send a test.
+            Connect securely with Google. Review the ordered pairs. Send a test.
             <br />
             Only then, give your batch the green light.
           </p>
@@ -596,8 +595,8 @@ function Landing() {
                 "Certificates are temporary on the server and are deleted after completion, stop, or expiry. History stays in this browser unless you export it. It is not shared automatically across devices.",
               ],
               [
-                "What happens if a certificate cannot be matched?",
-                "That recipient is blocked. Correct your CSV or ZIP, or explicitly skip the recipient. Suggested matches require your approval.",
+                "What if the ZIP and CSV counts differ?",
+                "The batch is blocked until counts are equal and every certificate is valid. Pairing follows the ZIP’s stored order and the CSV’s row order.",
               ],
               [
                 "Can I retry failed emails?",
@@ -637,10 +636,10 @@ function Shell() {
     [LayoutDashboard, "Dashboard", "/app"],
     [Plus, "New Batch", "/app/new?step=0"],
     [FileCheck2, "Certificates", "/app/new?step=0"],
-    [Users, "Recipients", "/app/new?step=2"],
-    [Mail, "Email Template", "/app/new?step=3"],
-    [Eye, "Preview", "/app/new?step=4"],
-    [Send, "Send", "/app/new?step=6"],
+    [Users, "Recipients", "/app/new?step=1"],
+    [Mail, "Email Template", "/app/new?step=2"],
+    [Eye, "Preview", "/app/new?step=3"],
+    [Send, "Send", "/app/new?step=5"],
     [History, "History", "/app/history"],
     [SettingsIcon, "Settings", "/app/settings"],
   ] as const;
@@ -739,7 +738,7 @@ function Shell() {
                 </div>
               )}
               {active(batch) && (
-                <Link to="/app/new?step=7" className="notice active-notice">
+                <Link to="/app/new?step=6" className="notice active-notice">
                   <LoaderCircle size={20} />
                   <span>
                     Batch {batch?.status} · {batch?.sent} sent · View live
@@ -845,7 +844,7 @@ function Dashboard() {
                 items={[
                   ["Recipients", batch.total],
                   [
-                    "Matched",
+                    "Paired",
                     batch.records.filter((r) => r.certificateId).length,
                   ],
                   ["Ready", batch.ready],
@@ -854,7 +853,7 @@ function Dashboard() {
               />
               <Link
                 className="button primary"
-                to={`/app/new?step=${active(batch) ? 7 : 0}`}
+                to={`/app/new?step=${active(batch) ? 6 : 0}`}
               >
                 Continue batch <ArrowRight size={17} />
               </Link>
@@ -1006,16 +1005,26 @@ function Dropzone({
   );
 }
 function Workflow() {
-  const { batch, setBatch, user, create, busy, run } = useApp();
+  const { batch, setBatch, user, create, busy, run, history } = useApp();
   const [params, setParams] = useSearchParams();
-  const index = Math.min(7, Math.max(0, Number(params.get("step")) || 0));
+  const index = Math.min(6, Math.max(0, Number(params.get("step")) || 0));
   const go = (i: number) => setParams({ step: String(i) });
   const [newConfirm, setNewConfirm] = useState(false);
   const upload = (kind: "zip" | "csv", file: File) =>
     run(async () => {
       const data = new FormData();
       data.append("file", file);
-      setBatch(await api<Batch>(`/batch/upload-${kind}`, data));
+      const uploaded = await api<Batch>(`/batch/upload-${kind}`, data);
+      setBatch(uploaded);
+      go(kind === "zip" ? 0 : 1);
+      if (uploaded.filesAvailable && uploaded.certificates.length &&
+          uploaded.mapping?.name && uploaded.mapping?.email) {
+        setBatch(await api<Batch>("/batch/pair", {
+          mapping: { name: uploaded.mapping.name, email: uploaded.mapping.email },
+          history: duplicateHistory(history),
+        }));
+        go(1);
+      }
     });
   return (
     <>
@@ -1025,7 +1034,7 @@ function Workflow() {
             ? `BATCH ${batch.batchId.slice(0, 8).toUpperCase()}`
             : "YOUR NEXT MOMENT"
         }
-        title={index === 7 ? "Delivery center" : "Let’s make it personal."}
+        title={index === 6 ? "Delivery center" : "Let’s make it personal."}
         description="A few careful steps. Every certificate in the right hands."
         action={
           batch &&
@@ -1082,10 +1091,10 @@ function Workflow() {
         </section>
       ) : (
         <>
-          {batch.status !== "draft" && index < 7 && (
+          {batch.status !== "draft" && index < 6 && (
             <div className="notice">
               This batch is {batch.status}. Its contents are locked.{" "}
-              <button className="text-button" onClick={() => go(7)}>
+              <button className="text-button" onClick={() => go(6)}>
                 View delivery report
               </button>
             </div>
@@ -1095,9 +1104,9 @@ function Workflow() {
               <div className="card-heading">
                 <div>
                   <h2>Upload your certificates</h2>
-                  <p>Keep filenames unique, even inside nested folders.</p>
+                  <p>ZIP order is used exactly as stored: certificate 1 goes to CSV row 1. Check the numbered list below; it may differ from your file browser’s sorting.</p>
                 </div>
-                <span className="tag">Step 1 of 8</span>
+                <span className="tag">Step 1 of 7</span>
               </div>
               {batch.status === "draft" && (
                 <Dropzone kind="ZIP" onFile={(f) => upload("zip", f)} />
@@ -1109,7 +1118,7 @@ function Workflow() {
                 </span>
                 <button
                   className="button primary"
-                  disabled={!batch.certificates.length}
+                  disabled={!batch.certificates.length || batch.certificates.some((c) => c.status !== "valid")}
                   onClick={() => go(1)}
                 >
                   Continue <ArrowRight size={17} />
@@ -1122,52 +1131,29 @@ function Workflow() {
               <div className="card-heading">
                 <div>
                   <h2>Who are we celebrating?</h2>
-                  <p>Upload your CSV, then check the column mapping.</p>
+                  <p>Use name and email columns in the same order as the certificates. Counts must be equal. No filename column is needed.</p>
                 </div>
-                <span className="tag">Step 2 of 8</span>
+                <span className="tag">Step 2 of 7</span>
               </div>
-              {batch.status === "draft" && (
+              {batch.status === "draft" && batch.certificates.length > 0 && (
                 <Dropzone kind="CSV" onFile={(f) => upload("csv", f)} />
               )}
-              <MappingEditor onContinue={() => go(2)} />
-            </section>
-          )}
-          {index === 2 && (
-            <section className="card">
-              <div className="card-heading">
-                <div>
-                  <h2>Every certificate. The right person.</h2>
-                  <p>
-                    Inspect suggested matches and approve them individually.
-                    Resolve or skip blocked records.
-                  </p>
+              {!batch.certificates.length && <p className="notice">Upload your certificate ZIP first.</p>}
+              {!batch.records.length && <MappingEditor />}
+              {batch.records.length > 0 && <>
+                <p className="notice">Paired by position. CSV row 1 receives ZIP certificate 1, and so on. Review the pairs before continuing. Skipping a row never shifts later certificates.</p>
+                <RecipientTable records={batch.records} editable={batch.status === "draft"} />
+                <div className="card-actions">
+                  <span>{batch.ready} ready · {batch.blocked} blocked · {batch.skipped} skipped</span>
+                  <button className="button primary" disabled={!batch.ready || batch.blocked > 0} onClick={() => go(2)}>
+                    Customize email <ArrowRight size={17} />
+                  </button>
                 </div>
-                <span className="tag">
-                  {batch.records.filter((r) => r.certificateId).length} /{" "}
-                  {batch.total} matched
-                </span>
-              </div>
-              <RecipientTable
-                records={batch.records}
-                editable={batch.status === "draft"}
-              />
-              <div className="card-actions">
-                <span>
-                  {batch.blocked} blocked · {batch.ready} ready ·{" "}
-                  {batch.skipped} skipped
-                </span>
-                <button
-                  className="button primary"
-                  disabled={!batch.records.length}
-                  onClick={() => go(3)}
-                >
-                  Customize email <ArrowRight size={17} />
-                </button>
-              </div>
+              </>}
             </section>
           )}
-          {index === 3 && <EmailEditor onContinue={() => go(4)} />}{" "}
-          {index === 4 && (
+          {index === 2 && <EmailEditor onContinue={() => go(3)} />}{" "}
+          {index === 3 && (
             <section className="card">
               <div className="card-heading">
                 <div>
@@ -1186,16 +1172,16 @@ function Workflow() {
                 <button
                   className="button primary"
                   disabled={!batch.ready}
-                  onClick={() => go(5)}
+                  onClick={() => go(4)}
                 >
                   Send a test <ArrowRight size={17} />
                 </button>
               </div>
             </section>
           )}
-          {index === 5 && <TestEmail onContinue={() => go(6)} />}{" "}
-          {index === 6 && <FinalReview onSend={() => go(7)} />}{" "}
-          {index === 7 && <Progress />}
+          {index === 4 && <TestEmail onContinue={() => go(5)} />}{" "}
+          {index === 5 && <FinalReview onSend={() => go(6)} />}{" "}
+          {index === 6 && <Progress />}
         </>
       )}
     </>
@@ -1212,7 +1198,6 @@ function CertificateTable() {
           ["Total files", files.length],
           ["Valid", files.filter((c) => c.status === "valid").length],
           ["Invalid", files.filter((c) => c.status === "invalid").length],
-          ["Duplicates", files.filter((c) => c.status === "duplicate").length],
         ]}
       />
       <p className="muted">
@@ -1222,6 +1207,7 @@ function CertificateTable() {
         <table>
           <thead>
             <tr>
+              <th>ZIP position</th>
               <th>Filename</th>
               <th>Type</th>
               <th>Size</th>
@@ -1229,8 +1215,9 @@ function CertificateTable() {
             </tr>
           </thead>
           <tbody>
-            {files.map((c) => (
+            {files.map((c, position) => (
               <tr key={c.id}>
+                <td>{position + 1}</td>
                 <td>
                   <strong>{c.filename}</strong>
                   <small>{c.relativePath}</small>
@@ -1249,72 +1236,36 @@ function CertificateTable() {
     </>
   );
 }
-function MappingEditor({ onContinue }: { onContinue: () => void }) {
+function MappingEditor() {
   const { batch, setBatch, history, run, busy } = useApp();
   const [mapping, setMapping] = useState<Mapping>(
     batch?.mapping ?? { name: "", email: "", certificate: "" },
   );
-  useEffect(() => {
-    if (batch?.mapping) setMapping(batch.mapping);
-  }, [batch?.mapping]);
+  useEffect(() => { if (batch?.mapping) setMapping(batch.mapping); }, [batch?.mapping]);
   if (!batch?.headers.length) return null;
   return (
     <div className="mapping">
-      <h3>Column mapping</h3>
-      <p>
-        Values are preserved exactly. Uncertain columns require your selection.
-      </p>
+      <h3>Name and email columns</h3>
+      <p>Choose the two CSV columns. Certificate assignment uses row order only.</p>
       <div className="form-grid">
-        {(["name", "email", "certificate", "certificate_id"] as const).map(
-          (key) => (
-            <label key={key}>
-              {
-                {
-                  name: "Recipient name",
-                  email: "Email address",
-                  certificate: "Certificate filename",
-                  certificate_id: "Certificate ID (optional)",
-                }[key]
-              }
-              <select
-                value={mapping[key] ?? ""}
-                onChange={(e) =>
-                  setMapping({ ...mapping, [key]: e.target.value })
-                }
-              >
-                <option value="">
-                  {key === "certificate"
-                    ? "No reference — require match approval"
-                    : "Select column"}
-                </option>
-                {batch.headers.map((h) => (
-                  <option key={h}>{h}</option>
-                ))}
-              </select>
-            </label>
-          ),
-        )}
+        {(["name", "email"] as const).map((key) => (
+          <label key={key}>
+            {key === "name" ? "Recipient name" : "Email address"}
+            <select value={mapping[key]} onChange={(e) => setMapping({ ...mapping, [key]: e.target.value })}>
+              <option value="">Select column</option>
+              {batch.headers.map((h) => <option key={h}>{h}</option>)}
+            </select>
+          </label>
+        ))}
       </div>
       <div className="card-actions">
-        <span>Missing references are flagged, never silently ignored.</span>
-        <button
-          className="button primary"
-          disabled={
-            busy || !mapping.name || !mapping.email || batch.status !== "draft"
-          }
-          onClick={() =>
-            run(async () => {
-              setBatch(
-                await api<Batch>("/batch/match", {
-                  mapping,
-                  history: duplicateHistory(history),
-                }),
-              );
-              onContinue();
-            })
-          }
-        >
-          Analyze & match <Sparkles size={17} />
+        <span>First row → first certificate. No filename matching.</span>
+        <button className="button primary"
+          disabled={busy || !mapping.name || !mapping.email || mapping.name === mapping.email || !batch.filesAvailable || batch.status !== "draft"}
+          onClick={() => run(async () => setBatch(await api<Batch>("/batch/pair", {
+            mapping: { name: mapping.name, email: mapping.email }, history: duplicateHistory(history),
+          })))}>
+          Show paired recipients <ArrowRight size={17} />
         </button>
       </div>
     </div>
@@ -1338,19 +1289,20 @@ function RecipientTable({
   const { batch, setBatch, run, busy } = useApp();
   const [query, setQuery] = useState(""),
     [filter, setFilter] = useState("all"),
-    [sort, setSort] = useState<"name" | "email" | "certificate" | "status">(
-      "name",
+    [sort, setSort] = useState<"order" | "name" | "email" | "certificate" | "status">(
+      "order",
     ),
     [desc, setDesc] = useState(false),
     [page, setPage] = useState(0),
     [selected, setSelected] = useState<string | null>(null);
   useEffect(() => setPage(0), [query, filter]);
+  const positions = new Map(records.map((r, i) => [r.id, i + 1]));
   const filtered = records
     .filter(
       (r) =>
         (filter === "all" ||
-          (filter === "matched" && !!r.certificateId) ||
-          (filter === "unmatched" && !r.certificateId) ||
+          (filter === "paired" && !!r.certificateId) ||
+          (filter === "unpaired" && !r.certificateId) ||
           (filter === "valid" && !r.errors.length) ||
           (filter === "invalid" && !!r.errors.length) ||
           r.status === filter) &&
@@ -1358,7 +1310,7 @@ function RecipientTable({
           .toLowerCase()
           .includes(query.toLowerCase()),
     )
-    .sort((a, b) => a[sort].localeCompare(b[sort]) * (desc ? -1 : 1));
+    .sort((a, b) => (sort === "order" ? positions.get(a.id)! - positions.get(b.id)! : a[sort].localeCompare(b[sort])) * (desc ? -1 : 1));
   const currentPage = Math.min(
     page,
     Math.max(0, Math.ceil(filtered.length / 20) - 1),
@@ -1387,8 +1339,8 @@ function RecipientTable({
         >
           {[
             "all",
-            "matched",
-            "unmatched",
+            "paired",
+            "unpaired",
             "valid",
             "invalid",
             "ready",
@@ -1416,7 +1368,7 @@ function RecipientTable({
           <p>
             {records.length
               ? "Try another search or filter."
-              : "Upload a CSV and analyze your certificate matches."}
+              : "Upload your ZIP and CSV in the same order."}
           </p>
         </div>
       ) : (
@@ -1424,7 +1376,7 @@ function RecipientTable({
           <table>
             <thead>
               <tr>
-                <th>#</th>
+                <th><button onClick={() => { setSort("order"); setDesc(false); }}>CSV row {sort === "order" ? "↑" : ""}</button></th>
                 {(["name", "email", "certificate", "status"] as const).map(
                   (key) => (
                     <th key={key}>
@@ -1440,15 +1392,15 @@ function RecipientTable({
                     </th>
                   ),
                 )}
-                <th>Match / action</th>
+                <th>Assignment / action</th>
               </tr>
             </thead>
             <tbody>
               {filtered
                 .slice(currentPage * 20, currentPage * 20 + 20)
-                .map((r, i) => (
+                .map((r) => (
                   <tr key={r.id}>
-                    <td>{currentPage * 20 + i + 1}</td>
+                    <td>{positions.get(r.id)}</td>
                     <td>
                       <button
                         className="row-name"
@@ -1467,16 +1419,6 @@ function RecipientTable({
                       {editable &&
                         !["sent", "unknown", "skipped"].includes(r.status) && (
                           <div className="row-actions">
-                            {!r.approved &&
-                              r.certificateId &&
-                              !r.errors.length && (
-                                <button
-                                  disabled={busy}
-                                  onClick={() => setSelected(r.id)}
-                                >
-                                  Review match
-                                </button>
-                              )}
                             {r.warnings.some((w) =>
                               w.startsWith("POSSIBLE DUPLICATE"),
                             ) && (
@@ -1534,7 +1476,7 @@ function RecipientTable({
             <dd>{row.email}</dd>
             <dt>Certificate</dt>
             <dd>{row.certificate || "Missing"}</dd>
-            <dt>Match method</dt>
+            <dt>Assignment</dt>
             <dd>{row.match}</dd>
             <dt>Status</dt>
             <dd>
@@ -1572,15 +1514,6 @@ function RecipientTable({
           )}
           {editable && row.status !== "sent" && row.status !== "unknown" && (
             <div className="modal-actions">
-              {!row.approved && row.certificateId && !row.errors.length && (
-                <button
-                  className="button primary"
-                  disabled={busy}
-                  onClick={() => action(row, "approve")}
-                >
-                  I verified this match
-                </button>
-              )}
               {row.warnings.some((w) => w.startsWith("POSSIBLE DUPLICATE")) && (
                 <button
                   className="button secondary"
@@ -1757,7 +1690,6 @@ function EmailEditor({ onContinue }: { onContinue: () => void }) {
             "certificate",
             "event",
             "date",
-            "certificate_id",
           ].map((v) => (
             <button
               key={v}
@@ -1833,7 +1765,7 @@ function EmailPreview({ fixedId }: { fixedId?: string }) {
     return (
       <div className="empty">
         <Mail size={30} />
-        <h3>Match certificates to preview your emails</h3>
+        <h3>Upload your ZIP and CSV to preview your emails</h3>
       </div>
     );
   return (
@@ -2051,7 +1983,7 @@ function FinalReview({ onSend }: { onSend: () => void }) {
       batch.blocked === 0 && batch.unknown === 0 && batch.total > 0,
     ],
     [
-      "Certificates matched",
+      "Certificates paired",
       batch.records
         .filter((r) => r.status === "ready")
         .every((r) => !!r.certificateId && r.approved),
@@ -2081,7 +2013,7 @@ function FinalReview({ onSend }: { onSend: () => void }) {
       <Stats
         items={[
           ["Ready", batch.ready],
-          ["Matched", batch.records.filter((r) => r.certificateId).length],
+          ["Paired", batch.records.filter((r) => r.certificateId).length],
           ["Blocked", batch.blocked + batch.unknown],
           ["Warnings", warnings],
           ["Already sent", batch.sent],
@@ -2109,8 +2041,8 @@ function FinalReview({ onSend }: { onSend: () => void }) {
             checked={confirmed}
             onChange={(e) => setConfirmed(e.target.checked)}
           />{" "}
-          I have reviewed this batch, its attachments and warnings, and want to
-          send it.
+          I have checked that each CSV row receives the certificate at the same
+          ZIP position, reviewed the attachments and warnings, and want to send.
         </label>
         <button
           className="button primary send-button"
@@ -2328,7 +2260,7 @@ function RetryButton({ records }: { records: Recipient[] }) {
       {confirm && (
         <Confirm
           title="Prepare a retry batch?"
-          text="Only confirmed failures will be included. Upload the original certificate ZIP, then match, preview, test and explicitly confirm this new batch. Uncertain deliveries are excluded."
+          text="Only confirmed failures will be included. Create a new ZIP containing only their certificates, in the same order as the downloaded retry CSV. Then review, preview, test and confirm. Do not upload the full original ZIP."
           action="Prepare retry"
           onClose={() => setConfirm(false)}
           onConfirm={() => {
@@ -2337,6 +2269,7 @@ function RetryButton({ records }: { records: Recipient[] }) {
               await api("/batch/new", {});
               const { theme, ...template } = settings;
               await api("/email/template", template);
+              download("retry-recipients.csv", retryCSV(failed), "text/csv");
               const form = new FormData();
               form.append(
                 "file",
@@ -2347,7 +2280,7 @@ function RetryButton({ records }: { records: Recipient[] }) {
               setBatch(await api<Batch>("/batch/upload-csv", form));
               navigate("/app/new?step=0");
               notify(
-                "Retry recipients loaded. Upload the original certificate ZIP.",
+                "Retry CSV downloaded. Upload only the failed recipients’ certificates in that CSV order.",
               );
             });
           }}
